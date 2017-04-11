@@ -1,0 +1,242 @@
+---
+title: "TestRMarkdown"
+output: html_document
+---
+
+# Chargement des librairies
+
+On charge les libraries necessaires grace au code R ci dessous.
+
+***
+
+```{r error=FALSE, warning=FALSE, message=FALSE}
+
+        for (package in c('proj4', 'rgdal', 'data.table')) {
+                if (!require(package, character.only=T, quietly=F)) {
+                        install.packages(package)
+                        library(package, character.only=T)
+                }
+        }
+
+```
+***
+Les librairies chargees sont : proj4 et rgdal.
+
+# Lecture du fichier
+
+On vient lire le fichier GPS et on extrait les valeurs les latitudes et des longitudes.
+
+***
+
+```{r error=FALSE, warning=FALSE, message=FALSE}
+        
+        tempsExec <- Sys.time()
+
+        data <- read.csv(file = "../data/AllDatas_20151103_180302_NmeaTimeLatLongSatnbAtlHSpeedVSpeed_output.csv", sep = ";", header = F)
+        
+        lat <- data[,3]
+        lon <- data [,4]
+
+```
+
+***
+
+Voici les premieres lignes des latitudes et les longitudes obtenues :
+
+```{r eval=TRUE, echo=FALSE}
+
+        print(head(lat), digits = 10)
+        print(head(lon), digits = 10)
+        
+``` 
+# Parametres de projection
+
+Le package *proj4* utilise pour projetter les valeurs de latitudes et de longitudes du gps permet d'effectuer toute sortes de projection en fonction de differents EPSG. Le nombre de parametre de projection etant assez important, une autre librairie permet de recuperer ces parametre : *rgdal*.
+L'EPSG desire est en temps normal passe en parametre de la fonction, mais pour l'exemple, nous allons traiter le cas le l'EPSG 2154.
+
+***
+
+```{r error=FALSE, warning=FALSE, message=FALSE}
+        
+        # Creation du dataframe contenant les correspondances entre les codes EPSG et les parametre de projection
+        EPSGPro4jMatching <- make_EPSG()
+        # On enleve les NAs
+        EPSGPro4jMatching <- EPSGPro4jMatching[complete.cases(EPSGPro4jMatching),]
+        # On regarde dans ce data frame a quelle ligne correspond le code epsg passe en parametre de fonction
+        for(val in 1:nrow(EPSGPro4jMatching)){
+                if (EPSGPro4jMatching[val, "code"] == 2154){
+                        ligne = val
+                }
+        }
+        
+        #On recupere le parametre de proj4 correspondant au code epsg passe en parmaetre
+        paramProj4EFonctionEPSG <- EPSGPro4jMatching[ligne, 3]
+        paramProj4EFonctionEPSG <- toString(paramProj4EFonctionEPSG)
+
+```
+
+***
+
+On obtient le parametre de projection suivant :
+
+```{r eval=TRUE, echo=FALSE}
+
+        print(paramProj4EFonctionEPSG)
+        
+```
+
+# La projection
+
+On utilise la fonction project du package *proj4* pour projetter les latitudes et longitudes du GPS, avec le param?tre de projection obtenu precedemment.
+
+***
+
+```{r error=FALSE, warning=FALSE, message=FALSE}
+        
+        # On projette les points GPS en coordonees selon le epsg passe en parametre
+        conv <- proj4::project(xy = list(lat, lon),
+                        proj = paramProj4EFonctionEPSG,
+                        inverse = FALSE,
+                        degrees = TRUE,
+                        silent = FALSE,
+                        ellps.default="sphere")
+
+        XLambert <- conv$x
+        YLambert <- conv$y
+
+```
+
+***
+
+Voici les premieres lignes des coordonnees projettees :
+
+```{r eval=TRUE, echo=FALSE}
+
+        print(head(conv$x), digits = 10)
+        print(head(conv$y), digits = 10)
+        
+```
+
+# Placement spatial des capteurs
+
+Pour le positionnement des capteurs dans l'espace, il faut estimer l'angle de la voiture. Pour cela nous prenons deux positions successives et calculons l'angle entre ces derni?res et l'axe des X.
+Pour le cas de la premiere position GPS, nous evaluons l'angle entre la premiere et la deuxieme position.
+ 
+Par simple projection de repere, nous obtenons les formules permettant d'obtenir la position du capteur dans l'espace.
+
+***
+
+```{r error=FALSE, warning=FALSE, message=FALSE}
+        
+    # Definition du positionnement des capteurs
+        
+        # Pour les premiers points de chaque capteur, on definit son orientation par rapport a la deuxieme valeur
+        ##### Definition de l'orientation #####
+        arctan <- atan((XLambert[2]-XLambert[1])/(YLambert[2]-YLambert[1]))
+        ##### Capteur 0 #####
+        XLambertCapt0 <- XLambert[1]+0.337*(cos(arctan)+sin(arctan))
+        YLambertCapt0 <- YLambert[1]+0.797*(-cos(arctan)+sin(arctan))
+        ##### Capteur 3 #####
+        XLambertCapt3 <- XLambert[1]+0.337*(cos(arctan)+sin(arctan))
+        YLambertCapt3 <- YLambert[1]+0.15*(-cos(arctan)+sin(arctan))
+        ##### Capteur 4 #####
+        XLambertCapt4 <- XLambert[1]+0.337*(cos(arctan)+sin(arctan))
+        YLambertCapt4 <- YLambert[1]-497*(-cos(arctan)+sin(arctan))
+        #### Distance #####
+        DistancePoints <- sqrt((XLambert[2]-XLambert[1])^2+(XLambert[2]-XLambert[1])^2)
+        
+        # Boucle pour les points de 2 a n
+        for(i in 2:length(XLambert)-1) {
+                
+            ##### Definition de l'orientation #####
+            arctan <- atan((XLambert[i]-XLambert[i-1])/(YLambert[i]-YLambert[i-1]))
+            ##### Capteur 0 #####
+            XLambertCapt0 <- c(XLambertCapt0, XLambert[i]+0.337*(cos(arctan)+sin(arctan)))
+            YLambertCapt0 <- c(YLambertCapt0, YLambert[i]+0.797*(-cos(arctan)+sin(arctan)))
+            ##### Capteur 3 #####
+            XLambertCapt3 <- c(XLambertCapt3, XLambert[i]+0.337*(cos(arctan)+sin(arctan)))
+            YLambertCapt3 <- c(YLambertCapt3, YLambert[i]+0.15*(-cos(arctan)+sin(arctan)))
+            ##### Capteur 4 #####
+            XLambertCapt4 <- c(XLambertCapt4, XLambert[i]+0.337*(cos(arctan)+sin(arctan)))
+            YLambertCapt4 <- c(YLambertCapt4, YLambert[i]-0.497*(-cos(arctan)+sin(arctan)))
+            #### Distance #####
+            DistancePoints <- c(DistancePoints, sqrt((XLambert[i+1]-XLambert[i])^2+(XLambert[i+1]-XLambert[i])^2))
+        }
+        
+        # Pour les derniers points de chaque capteur, on definit son orientation par rapport a la deuxieme valeur
+        ##### Definition de l'orientation #####
+        arctan <- atan((XLambert[length(XLambert)]-XLambert[length(XLambert)-1])/(YLambert[length(XLambert)]-YLambert[length(XLambert)-1]))
+        ##### Capteur 0 #####
+        XLambertCapt0 <- c(XLambertCapt0, XLambert[length(XLambert)]+0.337*(cos(arctan)+sin(arctan)))
+        YLambertCapt0 <- c(YLambertCapt0, YLambert[length(XLambert)]+0.797*(-cos(arctan)+sin(arctan)))
+        ##### Capteur 3 #####
+        XLambertCapt3 <- c(XLambertCapt3, XLambert[length(XLambert)]+0.337*(cos(arctan)+sin(arctan)))
+        YLambertCapt3 <- c(YLambertCapt3, YLambert[length(XLambert)]+0.15*(-cos(arctan)+sin(arctan)))
+        ##### Capteur 4 #####
+        XLambertCapt4 <- c(XLambertCapt4, XLambert[length(XLambert)]+0.337*(cos(arctan)+sin(arctan)))
+        YLambertCapt4 <- c(YLambertCapt4, YLambert[length(XLambert)]-0.497*(-cos(arctan)+sin(arctan)))
+        #### Distance #####
+        DistancePoints <- c(DistancePoints, sqrt((XLambert[length(XLambert)]-XLambert[length(XLambert)-1])^2+(XLambert[length(XLambert)]-XLambert[length(XLambert)-1])^2))
+
+```
+
+***
+
+Voici les premieres lignes des coordonnees des capteurs :
+
+```{r eval=TRUE, echo=FALSE}
+
+        print('Capteur 0')
+        print(head(XLambertCapt0), digits = 10)
+        print(head(YLambertCapt0), digits = 10)
+        
+        print('Capteur 3')
+        print(head(XLambertCapt3), digits = 10)
+        print(head(YLambertCapt3), digits = 10)
+        
+        print('Capteur 4')
+        print(head(XLambertCapt4), digits = 10)
+        print(head(YLambertCapt4), digits = 10)
+        
+```
+
+# Creation de la data.table
+
+On stocke toutes ces informations dans une *data.table* comprenant les colonnes suivantes :
+
+* Le timestamp
+* X capteur 0
+* Y capteur 0
+* X capteur 3
+* Y capteur 3
+* X capteur 4
+* Y capteur 4
+* La distance entre 2 points
+
+***
+
+```{r error=FALSE, warning=FALSE, message=FALSE}
+
+        result <- data.table(c(data[,1], XLambertCapt0, YLambertCapt0, XLambertCapt3, YLambertCapt3, XLambertCapt4, YLambertCapt4, DistancePoints))
+        
+```
+
+***
+
+Voici les premieres lignes de cette data.table :
+
+```{r eval=TRUE, echo=FALSE}
+
+        print(head(result))
+        
+```
+
+# Temps d'execution
+
+Le temps total d'execution de ce programme est de :
+
+```{r}
+
+        print(Sys.time()-tempsExec)
+        
+``` 
